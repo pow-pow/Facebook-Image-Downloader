@@ -10,7 +10,7 @@ import json
 import time
 import os
 
-class PageAccess:
+class PageImageDownloader:
 
     def __init__(self, page_name, album_name, img_dir, min_likes, access_token):
         # Page info
@@ -27,36 +27,34 @@ class PageAccess:
         self.token = access_token
 
     def printConfig(self):
-        print("PageAccess Configuration")
-        print("\t> %s" % self.page)
-        print("\t> %s" % self.album)
-        print("\t> %s" % self.img_dir)
-        print("\t> %s" % self.token)
+        print()
+        print(self.page.upper())
+        print("  > Album: %s" % self.album)
+        print("  > Save:  %s" % self.img_dir)
+        print("  > Token: %s" % self.token)
+        print()
 
     def start(self):
         self.printConfig()
-        print()
-        print("Starting...")
 
-        print("\t> Finding id for album \'%s\'..." % self.album)
+        print("  > Finding id for album \'%s\'..." % self.album)
         resp = self.getNodeData(self.page, "albums", 0, ["id", "name"], None)
 
         if resp != -1:
             album_id = self.getAlbum(resp)
 
             if int(album_id) > -1:
-                print("\t> Album found! Downloading images... (id: %s)" % str(album_id))
+                print("  > Album found! Downloading images... (id: %s)" % str(album_id))
                 resp = self.getNodeData(album_id, "photos", 0, ["images"], None)
                 count = self.processAlbum(self.page, resp)
+                print("\Done! %s images downloaded." % str(count))
 
-                print("\t> Finished! (%s images downloaded)" % str(count))
             else:
-                print("\t> ERROR: Album not found!")
-
+                print("\nERROR: Album not found!")
         else:
-            print("\t> ERROR: No response!")
+            print("\nERROR: No response!")
 
-        print("Done!")
+        print()
 
 
     def getNodeData(self, node, edge, limit, fields, summary):
@@ -93,13 +91,13 @@ class PageAccess:
                 resp = urlopen(Request(url), context=ssl._create_unverified_context())
                 success = resp.getcode() == 200
             except Exception as e:
-                print("ERROR (url: %s)" % url)
-                print("\t> %s" % e)
+                print("    > ERROR (url: %s)" % url)
+                print("      %s" % e)
 
                 if ignoreFailure:
                     return -1
                 else:
-                    print("\t> Retrying...")
+                    print("    > Retrying...")
                     time.sleep(3)
 
         return resp.read()
@@ -114,6 +112,22 @@ class PageAccess:
         return -1 # no album with chosen name
 
 
+    def checkMinimumLikes(self, image):
+        # If min is <= 0, all images will pass threshold
+        if self.min_likes <= 0:
+            return self.min_likes
+
+        # Get likes through request
+        resp_likes = self.getNodeData(image["id"], "likes", 0, None, ["total_count"])
+        if resp_likes != -1:
+            likes = resp_likes["summary"]["total_count"]
+            if likes >= self.min_likes:
+                return likes
+
+        # -1 if any problems
+        return -1
+
+
     def processAlbum(self, page, resp):
         """Walks through album and extracts all of its images."""
 
@@ -125,16 +139,14 @@ class PageAccess:
 
         while hasNextPage:
             for image in resp['data']:
-                if len(image['images']) > 0:
-
-                    resp_likes = self.getNodeData(image["id"], "likes", 0, None, ["total_count"])
-                    if resp_likes != -1:
-                        likes = resp_likes["summary"]["total_count"]
-                        file_name = str(self.img_dir + str(likes) + "_" + image["id"] + ".jpg")
-                        if likes >= self.min_likes and self.processImage(image['images'][0]['source'], file_name) != -1:
-                            count += 1
-                            if count % 50 == 0:
-                                print("\t\t> %s downloaded..." % str(count))
+                # Returns number of likes if okay, -1 if problem
+                likes = self.checkMinimumLikes(image)
+                if len(image['images']) > 0 and likes > -1:
+                    file_name = str(self.img_dir + str(likes) + "_" + image["id"] + ".jpg")
+                    if self.processImage(image['images'][0]['source'], file_name) != -1:
+                        count += 1
+                        if count % 50 == 0:
+                            print("    > %s downloaded..." % str(count))
 
             hasNextPage = 'paging' in resp.keys() and 'next' in resp['paging'].keys()
             if hasNextPage:
@@ -152,5 +164,5 @@ class PageAccess:
             resp = urlopen(Request(url), context=ssl._create_unverified_context())
             f.write(resp.read())
         except Exception as e:
-            print(e)
+            print("    > ", e)
             return -1
